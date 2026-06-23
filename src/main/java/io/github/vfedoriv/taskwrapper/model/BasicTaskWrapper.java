@@ -27,6 +27,8 @@ public class BasicTaskWrapper<T> implements TaskWrapper
 
   private final TasksService registrarService;
 
+  private int maxConsumerRestarts = 10;
+
   public BasicTaskWrapper(final int queueSize, final TasksService registrarService) {
     this("task-" + UUID.randomUUID(), queueSize, registrarService);
   }
@@ -56,11 +58,18 @@ public class BasicTaskWrapper<T> implements TaskWrapper
     producers.add(producer);
   }
 
+  public void setMaxConsumerRestarts(final int maxConsumerRestarts) {
+    if (maxConsumerRestarts < 0) {
+      throw new IllegalArgumentException("Max consumer restarts must not be negative");
+    }
+    this.maxConsumerRestarts = maxConsumerRestarts;
+  }
+
   @Override
   public void executeTask() {
     register(registrarService);
     try {
-      TaskLifecycleRunner.run(producers, consumers, queueWrapper);
+      TaskLifecycleRunner.run(producers, consumers, queueWrapper, maxConsumerRestarts);
     } finally {
       unregister(registrarService);
     }
@@ -97,6 +106,10 @@ public class BasicTaskWrapper<T> implements TaskWrapper
 
   public List<BasicProducer<T>> getProducers() {
     return producers;
+  }
+
+  public QueueWrapper<T> getQueueWrapper() {
+    return queueWrapper;
   }
 
   @Override

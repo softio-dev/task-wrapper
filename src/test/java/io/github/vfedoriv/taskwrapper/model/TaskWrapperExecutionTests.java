@@ -71,6 +71,7 @@ class TaskWrapperExecutionTests
   void consumerFailureFailsWholeTaskAndUnregisters() {
     TasksService tasksService = new TasksService();
     BasicTaskWrapper<Integer> wrapper = new BasicTaskWrapper<>("consumer-failure", 1, tasksService);
+    wrapper.setMaxConsumerRestarts(0);
     wrapper.addProducer(new ProducerPageDTO<>(), pagedProducer(List.of(1, 2, 3), 3));
     wrapper.addConsumer(item -> {
       throw new IllegalArgumentException("boom");

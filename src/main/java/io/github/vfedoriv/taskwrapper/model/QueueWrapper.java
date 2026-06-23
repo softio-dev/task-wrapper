@@ -39,6 +39,18 @@ public class QueueWrapper<T>
       this.consumersCompleted.set(true);
   }
 
+  public void clear() {
+    blockingQueue.clear();
+  }
+
+  public boolean isEmpty() {
+    return blockingQueue.isEmpty();
+  }
+
+  public int size() {
+    return blockingQueue.size();
+  }
+
   public boolean isInterrupt() {
     return interrupt.get();
   }

@@ -25,6 +25,10 @@ public class BasicConsumer<T>
     this.queueWrapper = Objects.requireNonNull(queueWrapper, "Queue wrapper is required");
   }
 
+  public BasicConsumer<T> newReplacement() {
+    return new BasicConsumer<>(queueWrapper, consumer);
+  }
+
   @Override
   public void run() {
     consume();

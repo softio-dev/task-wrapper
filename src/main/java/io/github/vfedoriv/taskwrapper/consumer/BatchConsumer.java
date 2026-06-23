@@ -41,6 +41,10 @@ public class BatchConsumer<T>
     this.consumerDTO = consumerDTO;
   }
 
+  public BatchConsumer<T> newReplacement() {
+    return new BatchConsumer<>(queueWrapper, biConsumer, consumerDTO, batchSize);
+  }
+
   @Override
   public void run() {
     consume();

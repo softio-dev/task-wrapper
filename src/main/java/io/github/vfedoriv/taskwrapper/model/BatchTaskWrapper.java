@@ -31,6 +31,8 @@ public class BatchTaskWrapper<T>
 
   private final int batchSize;
 
+  private int maxConsumerRestarts = 10;
+
   public BatchTaskWrapper(final int queueSize, final int batchSize, final TasksService registrarService) {
     this("task-" + UUID.randomUUID(), queueSize, batchSize, registrarService);
   }
@@ -72,11 +74,18 @@ public class BatchTaskWrapper<T>
     producers.add(producer);
   }
 
+  public void setMaxConsumerRestarts(final int maxConsumerRestarts) {
+    if (maxConsumerRestarts < 0) {
+      throw new IllegalArgumentException("Max consumer restarts must not be negative");
+    }
+    this.maxConsumerRestarts = maxConsumerRestarts;
+  }
+
   @Override
   public void executeTask() {
     register(registrarService);
     try {
-      TaskLifecycleRunner.run(producers, consumers, queueWrapper);
+      TaskLifecycleRunner.run(producers, consumers, queueWrapper, maxConsumerRestarts);
     }
     finally {
       unregister(registrarService);
@@ -114,6 +123,10 @@ public class BatchTaskWrapper<T>
 
   public List<BasicProducer<T>> getProducers() {
     return producers;
+  }
+
+  public QueueWrapper<T> getQueueWrapper() {
+    return queueWrapper;
   }
 
   @Override
