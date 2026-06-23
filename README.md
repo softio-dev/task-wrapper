@@ -99,6 +99,104 @@ What happens:
 - Four consumer instances drain the queue concurrently.
 - The task unregisters itself from `TasksService` when it finishes or fails.
 
+## Repository Ranged Query Producer
+
+Use `ProducerPageDTO<T>` to keep the paging cursor for repository queries that load items by range, for example `id > lastSeenId limit pageSize`.
+
+The repository should return a stable ordered page after the last processed item:
+
+```java
+@Component
+public class ExampleRepository
+{
+  private final List<ExampleItem> items = List.of(
+      new ExampleItem("item-001", "First example item"),
+      new ExampleItem("item-002", "Second example item"),
+      new ExampleItem("item-003", "Third example item"));
+
+  public List<ExampleItem> findExampleItemsByRange(
+      final String lastSeenId,
+      final Integer pageSize)
+  {
+    return items.stream()
+        .filter(item -> item.getId().compareTo(lastSeenId) > 0)
+        .limit(pageSize)
+        .toList();
+  }
+}
+```
+
+`RepositoryProducerHelper` adapts that repository method to the producer function signature expected by `BasicTaskWrapper`:
+
+```java
+@Component
+public class RepositoryProducerHelper
+{
+  private final ExampleRepository exampleRepository;
+
+  public RepositoryProducerHelper(final ExampleRepository exampleRepository) {
+    this.exampleRepository = exampleRepository;
+  }
+
+  public ProducerPageDTO<ExampleItem> produceExampleItems(
+      final ProducerPageDTO<ExampleItem> pageDTO)
+  {
+    return produceItems(pageDTO, exampleRepository::findExampleItemsByRange);
+  }
+}
+```
+
+Then wire the helper into a task:
+
+```java
+@Component
+public class RepositoryTaskWrapperExample
+{
+  private final RepositoryProducerHelper repositoryProducerHelper;
+  private final TasksService tasksService;
+
+  public RepositoryTaskWrapperExample(
+      final RepositoryProducerHelper repositoryProducerHelper,
+      final TasksService tasksService)
+  {
+    this.repositoryProducerHelper = repositoryProducerHelper;
+    this.tasksService = tasksService;
+  }
+
+  public TaskWrapper createTask() {
+    BasicTaskWrapper<ExampleItem> taskWrapper = new BasicTaskWrapper<>(
+        "example-repository-range-task",
+        100,
+        tasksService);
+
+    taskWrapper.addProducer(
+        new ProducerPageDTO<>("item-000", 2),
+        repositoryProducerHelper::produceExampleItems);
+
+    taskWrapper.addConsumer(this::processItem);
+    return taskWrapper;
+  }
+
+  public void runTask() {
+    createTask().executeTask();
+  }
+
+  private void processItem(final ExampleItem item) {
+    // Process one item loaded from the repository range.
+  }
+}
+```
+
+In this pattern:
+
+- `id` stores the initial cursor value, such as `item-000`.
+- `pageSize` becomes the repository query limit.
+- `lastItem` stores the last item returned by the previous repository page.
+- The next producer call uses `lastItem.getId()` as the next cursor.
+- An empty repository page marks the producer as complete.
+
+The complete sample lives under `src/main/java/io/github/vfedoriv/taskwrapper/examples`.
+
 ## Batch Task
 
 Use `BatchTaskWrapper<T>` when each consumer invocation should receive up to `batchSize` items.

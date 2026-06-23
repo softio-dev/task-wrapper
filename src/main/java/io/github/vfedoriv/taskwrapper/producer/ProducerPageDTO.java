@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class ProducerPageDTO<T>
 {
-  private String purl;
+  private String id;
 
   private int pageSize;
 
@@ -25,10 +25,10 @@ public class ProducerPageDTO<T>
   private boolean completed;
 
   public ProducerPageDTO(
-      String purl,
+      String id,
       int pageSize)
   {
-    this.purl = purl;
+    this.id = id;
     this.pageSize = pageSize;
   }
 
