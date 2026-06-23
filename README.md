@@ -38,6 +38,24 @@ A task is built from:
 
 Because `executeTask()` blocks, run it on a background thread when starting tasks from a web request, scheduler, or other interactive flow.
 
+## Producer Page State
+
+`ProducerPageDTO<T>` is mutable state owned by one producer. Create a separate instance for each producer and do not share it across producer threads.
+
+The DTO is not thread-safe: its fields are plain mutable values, `counter` updates are not atomic, and `items` may be a mutable list. Do not read or mutate a producer's `ProducerPageDTO` from another thread while the task is running. To stop a running task from another thread, use `TaskWrapper.interrupt()` or `TasksService.interrupt(...)` instead of calling `page.setCompleted(true)`.
+
+Field purposes:
+
+- `id`: producer-defined identifier or cursor. In ranged repository queries, this can hold the starting id or key.
+- `pageSize`: producer-defined fetch size or page size.
+- `counter`: producer-defined iteration counter. Increment it from the producer function when offset-based paging needs it.
+- `iteratedValue`: optional producer-defined progress value, such as a processed item count.
+- `lastItem`: optional producer-defined cursor state. The repository example uses it to remember the last item returned by the previous page.
+- `items`: the items produced by the current producer call. It must not be `null`; use `List.of()` for no items.
+- `completed`: set to `true` when the producer should not be called again.
+
+The producer loop stops when `completed` is `true`, when the producer returns an empty `items` list, or when the task is interrupted.
+
 ## Basic Item-by-Item Task
 
 Use `BasicTaskWrapper<T>` when each consumer invocation should receive one item.
