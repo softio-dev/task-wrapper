@@ -67,6 +67,8 @@ public class BasicProducer<T>
           while (!queueWrapper.isInterrupt() && !getQueue().offer(item, 10, TimeUnit.MILLISECONDS)) {
             log.trace("Queue is full; waiting to put item {}", item);
           }
+          log.info("Producer thread [{}] enqueued item {}; current queue size {}", Thread.currentThread().getName(), item,
+              getQueue().size());
           log.trace("put item {} in queue - done", item);
         }
       }

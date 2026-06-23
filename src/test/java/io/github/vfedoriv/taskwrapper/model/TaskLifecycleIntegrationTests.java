@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
@@ -21,23 +22,41 @@ import io.github.vfedoriv.taskwrapper.producer.ProducerPageDTO;
 import io.github.vfedoriv.taskwrapper.service.TasksService;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 class TaskLifecycleIntegrationTests
 {
+  private static final Logger log = LoggerFactory.getLogger(TaskLifecycleIntegrationTests.class);
+
+  private static final int DEFAULT_QUEUE_SIZE = 20;
+
   @Test
-  void backpressureDrainsBoundedQueueAndUnregisters() {
+  void backpressureFillsBoundedQueueWhenConsumerIsSlowerAndThenDrains() throws Exception {
     TasksService tasksService = new TasksService();
-    BasicTaskWrapper<Integer> wrapper = new BasicTaskWrapper<>("backpressure", 1, tasksService);
+    BasicTaskWrapper<Integer> wrapper = new BasicTaskWrapper<>("backpressure", DEFAULT_QUEUE_SIZE, tasksService);
     List<Integer> consumed = new CopyOnWriteArrayList<>();
-    wrapper.addProducer(new ProducerPageDTO<>(), pagedProducer(List.of(1, 2, 3, 4, 5), 5));
+    CountDownLatch consumerStarted = new CountDownLatch(1);
+    CountDownLatch releaseConsumer = new CountDownLatch(1);
+    AtomicReference<Throwable> failure = new AtomicReference<>();
+    wrapper.addProducer(new ProducerPageDTO<>(), pagedProducer(numberedItems(DEFAULT_QUEUE_SIZE + 5), DEFAULT_QUEUE_SIZE + 5));
     wrapper.addConsumer(item -> {
+      consumerStarted.countDown();
+      await(releaseConsumer);
       consumed.add(item);
-      sleep(20L);
     });
 
-    assertTimeoutPreemptively(Duration.ofSeconds(3), wrapper::executeTask);
+    Thread taskThread = startTask(wrapper, failure);
+    assertTrue(consumerStarted.await(1L, TimeUnit.SECONDS));
+    waitForQueueSize(wrapper, DEFAULT_QUEUE_SIZE);
+    assertTrue(taskThread.isAlive());
 
-    assertEquals(List.of(1, 2, 3, 4, 5), consumed.stream().sorted().toList());
+    releaseConsumer.countDown();
+    taskThread.join(2_000L);
+
+    assertFalse(taskThread.isAlive());
+    assertNoFailure(failure);
+    assertEquals(numberedItems(DEFAULT_QUEUE_SIZE + 5), consumed.stream().sorted().toList());
     assertTrue(wrapper.isTaskCompleted());
     assertFalse(tasksService.hasTask(wrapper));
     assertTrue(wrapper.getQueueWrapper().isEmpty());
@@ -128,25 +147,42 @@ class TaskLifecycleIntegrationTests
   @Test
   void interruptStopsTaskWithMultipleProducersAndConsumers() throws Exception {
     TasksService tasksService = new TasksService();
-    BasicTaskWrapper<Integer> wrapper = new BasicTaskWrapper<>("interrupt-many-workers", 2, tasksService);
+    BasicTaskWrapper<Integer> wrapper = new BasicTaskWrapper<>("interrupt-many-workers", DEFAULT_QUEUE_SIZE, tasksService);
     List<Thread> producerThreads = new CopyOnWriteArrayList<>();
     List<Thread> consumerThreads = new CopyOnWriteArrayList<>();
+    List<Integer> producedItems = new CopyOnWriteArrayList<>();
     AtomicReference<Throwable> failure = new AtomicReference<>();
+    AtomicInteger nextProducedItem = new AtomicInteger(1);
+    AtomicInteger nextConsumerNumber = new AtomicInteger(1);
+    AtomicBoolean monitorRunning = new AtomicBoolean(true);
 
-    wrapper.addProducer(new ProducerPageDTO<>(), repeatingProducer(producerThreads, 1));
-    wrapper.addProducer(new ProducerPageDTO<>(), repeatingProducer(producerThreads, 2));
+    wrapper.addProducer(new ProducerPageDTO<>(), sequencedProducer(1, wrapper, producerThreads, producedItems,
+        nextProducedItem));
+    wrapper.addProducer(new ProducerPageDTO<>(), sequencedProducer(2, wrapper, producerThreads, producedItems,
+        nextProducedItem));
     wrapper.addConsumers(item -> {
       consumerThreads.add(Thread.currentThread());
+      int consumerNumber = nextConsumerNumber.getAndUpdate(current -> current == 1 ? 2 : 1);
+      log.info("consumer {} consumed item {}; current queue size {}", consumerNumber, item, wrapper.getQueueWrapper().size());
       sleep(50L);
     }, 2);
 
+    Thread queueMonitor = startQueueMonitor(wrapper, monitorRunning);
     Thread taskThread = startTask(wrapper, failure);
-    while (!tasksService.hasTask(wrapper) || producerThreads.size() < 2 || consumerThreads.size() < 2) {
-      Thread.sleep(1L);
-    }
+    try {
+      while (!tasksService.hasTask(wrapper) || producerThreads.size() < 2 || consumerThreads.size() < 2) {
+        Thread.sleep(1L);
+      }
+      waitForQueueSize(wrapper, DEFAULT_QUEUE_SIZE);
 
-    tasksService.interrupt(wrapper.getTaskName());
-    taskThread.join(2_000L);
+      log.info("interrupt signal received; current queue size {}", wrapper.getQueueWrapper().size());
+      tasksService.interrupt(wrapper.getTaskName());
+      taskThread.join(2_000L);
+    }
+    finally {
+      monitorRunning.set(false);
+      queueMonitor.join(1_000L);
+    }
 
     assertFalse(taskThread.isAlive());
     assertNoFailure(failure);
@@ -155,6 +191,7 @@ class TaskLifecycleIntegrationTests
     assertTrue(wrapper.getQueueWrapper().isEmpty());
     assertTrue(producerThreads.stream().allMatch(thread -> !thread.isAlive()));
     assertTrue(consumerThreads.stream().allMatch(thread -> !thread.isAlive()));
+    assertTrue(producedItems.containsAll(List.of(1, 2, 3, 4)));
   }
 
   @Test
@@ -215,9 +252,11 @@ class TaskLifecycleIntegrationTests
     wrapper.setMaxConsumerRestarts(1);
     AtomicInteger invocations = new AtomicInteger();
     List<Integer> consumed = new CopyOnWriteArrayList<>();
+    List<Integer> failedBatch = new CopyOnWriteArrayList<>();
     wrapper.addProducer(new ProducerPageDTO<>(), pagedProducer(List.of(1, 2, 3, 4, 5, 6), 6));
     wrapper.addConsumer((items, dto) -> {
       if (invocations.incrementAndGet() == 1) {
+        failedBatch.addAll(items);
         throw new IllegalArgumentException("transient");
       }
       consumed.addAll(new ArrayList<>(items));
@@ -225,8 +264,11 @@ class TaskLifecycleIntegrationTests
 
     assertTimeoutPreemptively(Duration.ofSeconds(2), wrapper::executeTask);
 
-    assertEquals(List.of(3, 4, 5, 6), consumed.stream().sorted().toList());
-    assertEquals(3, invocations.get());
+    List<Integer> processedItems = new ArrayList<>(failedBatch);
+    processedItems.addAll(consumed);
+    assertEquals(List.of(1, 2, 3, 4, 5, 6), processedItems.stream().sorted().toList());
+    assertTrue(consumed.stream().noneMatch(failedBatch::contains));
+    assertTrue(invocations.get() > 1);
     assertTrue(wrapper.isTaskCompleted());
     assertFalse(tasksService.hasTask(wrapper));
     assertTrue(wrapper.getQueueWrapper().isEmpty());
@@ -260,15 +302,61 @@ class TaskLifecycleIntegrationTests
     };
   }
 
-  private static UnaryOperator<ProducerPageDTO<Integer>> repeatingProducer(
+  private static UnaryOperator<ProducerPageDTO<Integer>> sequencedProducer(
+      final int producerNumber,
+      final BasicTaskWrapper<Integer> wrapper,
       final List<Thread> producerThreads,
-      final Integer item)
+      final List<Integer> producedItems,
+      final AtomicInteger nextProducedItem)
   {
     return page -> {
       producerThreads.add(Thread.currentThread());
-      page.setItems(List.of(item));
+      int start = nextProducedItem.getAndAdd(4);
+      List<Integer> items = List.of(start, start + 1, start + 2, start + 3);
+      producedItems.addAll(items);
+      page.setItems(items);
+      log.info("producer {} generated items {}; queue size before enqueue {}", producerNumber, items,
+          wrapper.getQueueWrapper().size());
       return page;
     };
+  }
+
+  private static Thread startQueueMonitor(
+      final BasicTaskWrapper<Integer> wrapper,
+      final AtomicBoolean monitorRunning)
+  {
+    Thread thread = new Thread(() -> {
+      int previousSize = -1;
+      while (monitorRunning.get()) {
+        int currentSize = wrapper.getQueueWrapper().size();
+        if (currentSize != previousSize) {
+          log.info("current queue size {}", currentSize);
+          previousSize = currentSize;
+        }
+        sleep(1L);
+      }
+      log.info("current queue size {}", wrapper.getQueueWrapper().size());
+    }, "queue-size-monitor");
+    thread.start();
+    return thread;
+  }
+
+  private static List<Integer> numberedItems(final int count) {
+    List<Integer> items = new ArrayList<>();
+    for (int i = 1; i <= count; i++) {
+      items.add(i);
+    }
+    return items;
+  }
+
+  private static void waitForQueueSize(final BasicTaskWrapper<Integer> wrapper, final int expectedSize)
+      throws InterruptedException
+  {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1L);
+    while (wrapper.getQueueWrapper().size() < expectedSize && System.nanoTime() < deadline) {
+      Thread.sleep(1L);
+    }
+    assertEquals(expectedSize, wrapper.getQueueWrapper().size());
   }
 
   private static void await(final CountDownLatch latch) {
