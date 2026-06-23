@@ -1,8 +1,10 @@
 package io.github.vfedoriv.taskwrapper.producer;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
-import java.util.function.Supplier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.UnaryOperator;
 
 import io.github.vfedoriv.taskwrapper.model.QueueWrapper;
@@ -17,7 +19,7 @@ public class BasicProducer<T>
 
   private final UnaryOperator<ProducerPageDTO<T>> itemsProducerFunction;
 
-  private boolean completed = false;
+  private final AtomicBoolean completed = new AtomicBoolean(false);
 
   private ProducerPageDTO<T> pageDTO;
 
@@ -26,22 +28,17 @@ public class BasicProducer<T>
       final ProducerPageDTO<T> producerPageDTO,
       final UnaryOperator<ProducerPageDTO<T>> itemsProducerFunction)
   {
-    this.queueWrapper = queueWrapper;
-    this.itemsProducerFunction = itemsProducerFunction;
-    this.pageDTO = producerPageDTO;
+    this.queueWrapper = Objects.requireNonNull(queueWrapper, "Queue wrapper is required");
+    this.itemsProducerFunction = Objects.requireNonNull(itemsProducerFunction, "Producer function is required");
+    this.pageDTO = Objects.requireNonNull(producerPageDTO, "Producer page DTO is required");
   }
 
   public boolean isCompleted() {
-    if (queueWrapper.isInterrupt()) {
-      completed = true;
-      log.info("Producer thread [{}] . Interrupted", Thread.currentThread().getName());
-      Thread.currentThread().interrupt();
-    }
-    return completed;
+    return completed.get();
   }
 
   public void setCompleted(final boolean completed) {
-    this.completed = completed;
+    this.completed.set(completed);
   }
 
   @Override
@@ -54,31 +51,37 @@ public class BasicProducer<T>
   }
 
   protected void produce() {
-    while (!Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt() && !this.pageDTO.isCompleted() &&
-        !isCompleted()) {
-      try {
-        pageDTO = itemsProducerFunction.apply(pageDTO);
-        List<T> items = pageDTO.getItems();
+    try {
+      while (!Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt() && !this.pageDTO.isCompleted()) {
+        pageDTO = Objects.requireNonNull(itemsProducerFunction.apply(pageDTO), "Producer function returned null");
+        List<T> items = Objects.requireNonNull(pageDTO.getItems(), "Producer page items must not be null");
         log.debug("Items produced: {}", items.size());
         if (items.isEmpty() || queueWrapper.isInterrupt()) {
-          setCompleted(true);
           break;
         }
         for (T item : items) {
+          if (queueWrapper.isInterrupt()) {
+            break;
+          }
           log.trace("put item {} in queue - start", item);
-          // the thread will wait here if queue is full
-          getQueue().put(item);
+          while (!queueWrapper.isInterrupt() && !getQueue().offer(item, 10, TimeUnit.MILLISECONDS)) {
+            log.trace("Queue is full; waiting to put item {}", item);
+          }
           log.trace("put item {} in queue - done", item);
         }
       }
-      catch (Throwable e) {
-        log.error("Exception {} in thread [{}]. Will be interrupted. Stack trace: {}", Thread.currentThread().getName(),
-            e.getMessage(), e.getStackTrace());
-        Thread.currentThread().interrupt();
-      }
     }
-    setCompleted(true);
-    log.debug("Producer thread [{}] . Done", Thread.currentThread().getName());
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Producer was interrupted", e);
+    }
+    finally {
+      setCompleted(true);
+      log.debug("Producer thread [{}] . Done", Thread.currentThread().getName());
+    }
+    if (Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt()) {
+      throw new IllegalStateException("Producer was interrupted");
+    }
   }
 
   public ProducerPageDTO<T> getPageDTO() {

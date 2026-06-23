@@ -5,8 +5,8 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 import io.github.vfedoriv.taskwrapper.model.QueueWrapper;
 
@@ -20,7 +20,7 @@ public class BatchConsumer<T>
 
   private final BiConsumer<Collection<T>, Object> biConsumer;
 
-  private boolean completed = false;
+  private final AtomicBoolean completed = new AtomicBoolean(false);
 
   private final int batchSize;
 
@@ -32,8 +32,11 @@ public class BatchConsumer<T>
       final Object consumerDTO,
       final int batchSize)
   {
-    this.biConsumer = biConsumer;
-    this.queueWrapper = queueWrapper;
+    if (batchSize <= 0) {
+      throw new IllegalArgumentException("Batch size must be greater than zero");
+    }
+    this.biConsumer = Objects.requireNonNull(biConsumer, "Batch consumer function is required");
+    this.queueWrapper = Objects.requireNonNull(queueWrapper, "Queue wrapper is required");
     this.batchSize = batchSize;
     this.consumerDTO = consumerDTO;
   }
@@ -49,10 +52,9 @@ public class BatchConsumer<T>
 
   protected void consume() {
     Collection<T> items = new ArrayList<>();
-    while (!Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt()) {
-      try {
+    try {
+      while (!Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt()) {
         if (queueWrapper.isProducersCompleted() && getQueue().isEmpty()) {
-          setCompleted(true);
           break;
         }
         log.trace("Consuming items from queue");
@@ -67,21 +69,25 @@ public class BatchConsumer<T>
         // process items
         this.biConsumer.accept(items, consumerDTO);
       }
-      catch (Throwable e) {
-        log.error("Exception {} in thread [{}]. Will be interrupted. Stack trace: {}", Thread.currentThread().getName(),
-            e.getMessage(), e.getStackTrace());
-        Thread.currentThread().interrupt();
-      }
     }
-    setCompleted(true);
-    log.debug("Consumer thread [{}] . Done", Thread.currentThread().getName());
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Batch consumer was interrupted", e);
+    }
+    finally {
+      setCompleted(true);
+      log.debug("Consumer thread [{}] . Done", Thread.currentThread().getName());
+    }
+    if (Thread.currentThread().isInterrupted() && !queueWrapper.isInterrupt()) {
+      throw new IllegalStateException("Batch consumer was interrupted");
+    }
   }
 
   public boolean isCompleted() {
-    return completed;
+    return completed.get();
   }
 
   public void setCompleted(final boolean completed) {
-    this.completed = completed;
+    this.completed.set(completed);
   }
 }

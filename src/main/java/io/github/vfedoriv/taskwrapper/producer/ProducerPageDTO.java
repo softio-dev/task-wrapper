@@ -1,6 +1,7 @@
 package io.github.vfedoriv.taskwrapper.producer;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -19,7 +20,7 @@ public class ProducerPageDTO<T>
 
   private T lastItem;
 
-  private List<T> items;
+  private List<T> items = new ArrayList<>();
 
   private boolean completed;
 

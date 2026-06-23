@@ -1,6 +1,7 @@
 package io.github.vfedoriv.taskwrapper.service;
 
 import java.util.Collection;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.vfedoriv.taskwrapper.model.TaskWrapper;
@@ -13,17 +14,15 @@ public class TasksService
   private final ConcurrentHashMap<String, TaskWrapper> tasks = new ConcurrentHashMap<>();
 
   public void addTask(final TaskWrapper task) {
-    if (task == null) {
-      throw new RuntimeException("Cannot add - task is null");
-    }
+    Objects.requireNonNull(task, "Cannot add null task");
     if (tasks.putIfAbsent(task.getTaskName(), task) != null) {
-      throw new RuntimeException("Task already in task list!");
+      throw new IllegalStateException("Task already in task list: " + task.getTaskName());
     }
   }
 
   public void removeTask(final TaskWrapper task) {
     if (task != null) {
-      tasks.remove(task.getTaskName());
+      tasks.remove(task.getTaskName(), task);
     }
   }
 
@@ -36,34 +35,42 @@ public class TasksService
   }
 
   public boolean hasTask(final TaskWrapper task) {
+    if (task == null) {
+      return false;
+    }
     return tasks.containsKey(task.getTaskName());
   }
 
   public void interrupt(final String taskName) {
-    if (tasks.containsKey(taskName)) {
-      tasks.get(taskName).interrupt();
+    TaskWrapper task = getTaskOrThrow(taskName);
+    task.interrupt();
+  }
+
+  private TaskWrapper getTaskOrThrow(final String taskName) {
+    if (taskName == null) {
+      throw new IllegalArgumentException("Task name is required");
     }
+    TaskWrapper task = tasks.get(taskName);
+    if (task == null) {
+      throw new IllegalArgumentException("Task with provided name does not exist: " + taskName);
+    }
+    return task;
   }
 
   public boolean isInterrupted(final String taskName) {
-    if (tasks.containsKey(taskName)) {
-      return tasks.get(taskName).isInterrupted();
-    }
-    throw new RuntimeException("Task with provided name not exist!");
+    return getTaskOrThrow(taskName).isInterrupted();
   }
 
   public void removeInterruptedTasks() {
-    tasks.forEach( (key, value) -> {
+    tasks.forEach((key, value) -> {
       if (value.isInterrupted()) {
-        tasks.remove(key);
+        tasks.remove(key, value);
       }
     });
   }
 
   public void interruptAll() {
-    tasks.forEach( (key, value) -> {
-      value.interrupt();
-      });
+    tasks.forEach((key, value) -> value.interrupt());
   }
 
 }

@@ -2,6 +2,7 @@ package io.github.vfedoriv.taskwrapper.model;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import lombok.Data;
 
@@ -12,26 +13,41 @@ public class QueueWrapper<T>
 
   private final BlockingQueue<T> blockingQueue;
 
-  private boolean interrupt = false;
+  private final AtomicBoolean interrupt = new AtomicBoolean(false);
 
-  private boolean producersCompleted = false;
+  private final AtomicBoolean producersCompleted = new AtomicBoolean(false);
 
-  private boolean consumersCompleted = false;
+  private final AtomicBoolean consumersCompleted = new AtomicBoolean(false);
 
   public QueueWrapper(final Integer queueSize) {
+    if (queueSize == null || queueSize <= 0) {
+      throw new IllegalArgumentException("Queue size must be greater than zero");
+    }
     this.queueSize = queueSize;
     this.blockingQueue = new LinkedBlockingQueue<T>(queueSize);
   }
 
   public void interrupt() {
-      this.interrupt = true;
+      this.interrupt.set(true);
   }
 
   public void producersComplete() {
-      this.producersCompleted = true;
+      this.producersCompleted.set(true);
   }
 
   public void consumersComplete() {
-      this.consumersCompleted = true;
+      this.consumersCompleted.set(true);
+  }
+
+  public boolean isInterrupt() {
+    return interrupt.get();
+  }
+
+  public boolean isProducersCompleted() {
+    return producersCompleted.get();
+  }
+
+  public boolean isConsumersCompleted() {
+    return consumersCompleted.get();
   }
 }

@@ -3,9 +3,8 @@ package io.github.vfedoriv.taskwrapper.model;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.UnaryOperator;
 
@@ -22,8 +21,6 @@ public class BatchTaskWrapper<T>
 {
   private final String taskName;
 
-  private final long threadId;
-
   private final List<BatchConsumer<T>> consumers = new ArrayList<>();
 
   private final List<BasicProducer<T>> producers = new ArrayList<>();
@@ -34,28 +31,23 @@ public class BatchTaskWrapper<T>
 
   private final int batchSize;
 
-  private ThreadPoolExecutor threadPoolExecutor;
-
   public BatchTaskWrapper(final int queueSize, final int batchSize, final TasksService registrarService) {
-    // TODO: with this impl task name will a name of method where task object created
-    // so if we call the same method twice, a exception will be thrown when we try to register this task in TaskService
-    // consider to create a constructor that accept custom task name instead?
-    this.taskName = StackWalker.getInstance()
-        .walk(frames -> frames.skip(2).findFirst().map(StackWalker.StackFrame::getMethodName)).orElse("unknown method");
-    this.threadId = Thread.currentThread().getId();
+    this("task-" + UUID.randomUUID(), queueSize, batchSize, registrarService);
+  }
+
+  public BatchTaskWrapper(final String taskName, final int queueSize, final int batchSize, final TasksService registrarService) {
+    if (batchSize <= 0) {
+      throw new IllegalArgumentException("Batch size must be greater than zero");
+    }
+    this.taskName = Objects.requireNonNull(taskName, "Task name is required");
     this.queueWrapper = new QueueWrapper<T>(queueSize);
     this.registrarService = registrarService;
     this.batchSize = batchSize;
   }
 
   public void addConsumer(final BiConsumer<Collection<T>, Object> biConsumer, final Object consumerDTO) {
-    try {
-      BatchConsumer<T> object = new BatchConsumer<>(this.queueWrapper, biConsumer, consumerDTO, batchSize);
-      consumers.add(object);
-    }
-    catch (Exception e) {
-      log.error("Error on consumer instance creation: {}", e.getMessage());
-    }
+    BatchConsumer<T> object = new BatchConsumer<>(this.queueWrapper, biConsumer, consumerDTO, batchSize);
+    consumers.add(object);
   }
 
   public void addConsumer(final BiConsumer<Collection<T>, Object> biConsumer) {
@@ -63,14 +55,11 @@ public class BatchTaskWrapper<T>
   }
 
   public void addConsumers(final BiConsumer<Collection<T>, Object> biConsumer, final Object consumerDTO, final int instancesCount) {
-    try {
-      for (int i = 0; i < instancesCount; i++) {
-        BatchConsumer<T> object = new BatchConsumer<>(this.queueWrapper, biConsumer, consumerDTO, batchSize);
-        consumers.add(object);
-      }
+    if (instancesCount <= 0) {
+      throw new IllegalArgumentException("Instances count must be greater than zero");
     }
-    catch (Exception e) {
-      log.error("Error on consumer instance creation: {}", e.getMessage());
+    for (int i = 0; i < instancesCount; i++) {
+      addConsumer(biConsumer, consumerDTO);
     }
   }
 
@@ -79,34 +68,15 @@ public class BatchTaskWrapper<T>
   }
 
   public void addProducer(final ProducerPageDTO<T> producerPageDTO, final UnaryOperator<ProducerPageDTO<T>> itemsProducerFunction) {
-    try {
-      BasicProducer<T> producer = new BasicProducer<T>(this.queueWrapper, producerPageDTO, itemsProducerFunction);
-      producers.add(producer);
-    }
-    catch (Exception e) {
-      log.error("Error on producer instance creation: {}", e.getMessage());
-    }
+    BasicProducer<T> producer = new BasicProducer<T>(this.queueWrapper, producerPageDTO, itemsProducerFunction);
+    producers.add(producer);
   }
 
   @Override
   public void executeTask() {
     register(registrarService);
     try {
-      int threadsCount = consumers.size() + producers.size();
-      this.threadPoolExecutor = new ThreadPoolExecutor(threadsCount, threadsCount, 0L, TimeUnit.SECONDS,
-          new LinkedBlockingQueue<>(threadsCount));
-      producers.forEach(task -> threadPoolExecutor.submit(task));
-      consumers.forEach(task -> threadPoolExecutor.submit(task));
-      while (!isTaskCompleted()) {
-        log.trace("wait until all internal tasks completed");
-        try {
-          TimeUnit.MILLISECONDS.sleep(1);
-        }
-        catch (InterruptedException e) {
-          throw new RuntimeException(e);
-        }
-      }
-      queueWrapper.interrupt();
+      TaskLifecycleRunner.run(producers, consumers, queueWrapper);
     }
     finally {
       unregister(registrarService);
@@ -125,26 +95,12 @@ public class BatchTaskWrapper<T>
 
   @Override
   public boolean isProducersCompleted() {
-    for (BasicProducer<T> producer : producers) {
-      if (!producer.isCompleted()) {
-        return false;
-      }
-    }
-    queueWrapper.producersComplete();
-    log.trace("producers completed");
-    return true;
+    return producers.stream().allMatch(BasicProducer::isCompleted);
   }
 
   @Override
   public boolean isConsumersCompleted() {
-    for (BatchConsumer<T> consumer : consumers) {
-      if (!consumer.isCompleted()) {
-        return false;
-      }
-    }
-    queueWrapper.consumersComplete();
-    log.trace("consumers completed");
-    return true;
+    return consumers.stream().allMatch(BatchConsumer::isCompleted);
   }
 
   @Override
