@@ -30,6 +30,13 @@
             <organization>softio-dev</organization>
             <organizationUrl>https://github.com/softio-dev</organizationUrl>
         </developer>
+        <developer>
+            <id>vfedoriv</id>
+            <name>Vitaliy Fedoriv</name>
+            <url>https://github.com/vfedoriv</url>
+            <organization>softio-dev</organization>
+            <organizationUrl>https://github.com/softio-dev</organizationUrl>
+        </developer>
     </developers>
     <scm>
         <connection>scm:git:https://github.com/softio-dev/task-wrapper.git</connection>
