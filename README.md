@@ -1,5 +1,8 @@
 # task-wrapper
 
+[![Maven Central](https://img.shields.io/maven-central/v/dev.softio/task-wrapper.svg?label=Maven%20Central)](https://repo1.maven.org/maven2/dev/softio/task-wrapper/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 `task-wrapper` is a small Spring Boot library for running producer/consumer tasks over a bounded in-memory queue.
 
 The main API is:
