@@ -10,7 +10,7 @@
     </parent>
     <groupId>dev.softio</groupId>
     <artifactId>task-wrapper</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>${project.groupId}:${project.artifactId}</name>
     <description>Spring Boot task wrapper library for producer and consumer workflows over bounded in-memory queues.</description>
