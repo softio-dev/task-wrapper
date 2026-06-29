@@ -8,7 +8,7 @@
         <version>4.1.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>io.github.vfedoriv</groupId>
+    <groupId>dev.softio</groupId>
     <artifactId>task-wrapper</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>task-wrapper</name>

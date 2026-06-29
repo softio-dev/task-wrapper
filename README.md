@@ -66,9 +66,9 @@ package example;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.github.vfedoriv.taskwrapper.model.BasicTaskWrapper;
-import io.github.vfedoriv.taskwrapper.producer.ProducerPageDTO;
-import io.github.vfedoriv.taskwrapper.service.TasksService;
+import dev.softio.taskwrapper.model.BasicTaskWrapper;
+import dev.softio.taskwrapper.producer.ProducerPageDTO;
+import dev.softio.taskwrapper.service.TasksService;
 
 import org.springframework.stereotype.Service;
 
@@ -213,7 +213,7 @@ In this pattern:
 - The next producer call uses `lastItem.getId()` as the next cursor.
 - An empty repository page marks the producer as complete.
 
-The complete sample lives under `src/main/java/io/github/vfedoriv/taskwrapper/examples`.
+The complete sample lives under `src/main/java/dev/softio/taskwrapper/examples`.
 
 ## Batch Task
 
@@ -226,9 +226,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import io.github.vfedoriv.taskwrapper.model.BatchTaskWrapper;
-import io.github.vfedoriv.taskwrapper.producer.ProducerPageDTO;
-import io.github.vfedoriv.taskwrapper.service.TasksService;
+import dev.softio.taskwrapper.model.BatchTaskWrapper;
+import dev.softio.taskwrapper.producer.ProducerPageDTO;
+import dev.softio.taskwrapper.service.TasksService;
 
 import org.springframework.stereotype.Service;
 
@@ -291,8 +291,8 @@ Only one active task can use a given name. Registering another task with the sam
 ```java
 import java.util.Collection;
 
-import io.github.vfedoriv.taskwrapper.model.TaskWrapper;
-import io.github.vfedoriv.taskwrapper.service.TasksService;
+import dev.softio.taskwrapper.model.TaskWrapper;
+import dev.softio.taskwrapper.service.TasksService;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
